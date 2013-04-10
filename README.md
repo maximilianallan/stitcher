@@ -10,6 +10,6 @@ stitcher will progressively find matches between the images mapping the pixels i
 Dependencies
 ------------
 
-OpenCV Python wrappers
-Numpy
+* OpenCV 2.3x or higher with Python wrappers
+* Numpy
 
