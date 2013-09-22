@@ -32,10 +32,10 @@ class Stitcher:
 
         keypoints = (self.find_keypoints(image_1),self.find_keypoints(image_2))
         matched_keypoints = self.match_keypoints(keypoints[0],keypoints[1])
+        
+        matched_keypoints = sorted(matched_keypoints,key = lambda x: x.distance)#, reverse=True)
 
-        matched_keypoints = sorted(matched_keypoints,key = lambda x: x.distance, reverse=True)
-
-        good_keypoints = [ ((keypoints[0][0][mkp.queryIdx].pt),(keypoints[1][0][mkp.trainIdx].pt)) for mkp in matched_keypoints[:10] ]
+        good_keypoints = [ ((keypoints[0][0][mkp.queryIdx].pt),(keypoints[1][0][mkp.trainIdx].pt)) for mkp in matched_keypoints[:30] ]
 
         #print len(keypoints[0][0])
         #print len(keypoints[1][0])
@@ -49,7 +49,7 @@ class Stitcher:
   #              print mkp.trainIdx
    #         good_keypoints.append( pt1,pt2 )
 
-        self.find_relative_pose(np.asarray([x[0] for x in good_keypoints]),np.asarray([x[1] for x in good_keypoints]))
+        self.find_relative_pose(np.asarray([x[0] for x in good_keypoints]),np.asarray([x[1] for x in good_keypoints]),image_1,image_2)
         
         #tt = []
         #for mkp in matched_keypoints[:10]:
@@ -60,25 +60,25 @@ class Stitcher:
 
         
 
-    def find_relative_pose(self,kp1,kp2):
+    def find_relative_pose(self,kp1,kp2,image_1,image_2):
 
         (transformation,mask) = cv2.findHomography(kp1,kp2)
         
-        x = np.ndarray((3,1))
-        x[0,0] = kp2[0,0]
-        x[1,0] = kp2[0,1]
-        x[2,0] = 1
+        #x = np.ndarray((3,1))
+        #x[0,0] = kp2[0,0]
+        #x[1,0] = kp2[0,1]
+        #x[2,0] = 1
 
         #x = np.asarray([kp1[0,0],kp1[0,  1],1])
-        print x
-        print transformation.dot(x)
-        print kp[0,:]
+        #print x
+        #print transformation.dot(x)
+        #print kp[0,:]
 
         
-        sys.exit(1)
-
-        thres_dist = (sum(dist) / len(dist)) * 0.5
-        sel_matches = [m for m in matched_keypoints if m.distance < thres_dist]
+        #sys.exit(1)
+        #dist = [m.distance for m in matched_keypoints]
+        #thres_dist = (sum(dist) / len(dist)) * 0.5
+        #sel_matches = [m for m in matched_keypoints if m.distance < thres_dist]
     
         h1, w1 = image_1.shape[:2]
         h2, w2 = image_2.shape[:2]
@@ -88,10 +88,10 @@ class Stitcher:
         view[:, :, 1] = view[:, :, 0]
         view[:, :, 2] = view[:, :, 0]
     
-        l_kp = keypoints[0]
-        r_kp = keypoints[1]
+        #l_kp = keypoints[0]
+        #r_kp = keypoints[1]
 
-        for m in sel_matches:
+        """for m in sel_matches:
         # draw the keypoints
             color = tuple([sp.random.randint(0, 255) for _ in xrange(3)])
             start = (int(l_kp[0][m.queryIdx].pt[0]),int(l_kp[0][m.queryIdx].pt[1]))
@@ -99,6 +99,16 @@ class Stitcher:
     #        print start
     #        print end
             cv2.line(view, start , end,  color)
+        """
+        for l,r in zip(kp1,kp2):
+          print l
+        # draw the keypoints
+          color = tuple([sp.random.randint(0, 255) for _ in xrange(3)])
+          start = (int(l[0]),int(l[1]))
+          end = (int(r[0] + w1), int(r[1]))
+    #     print start
+    #     print end
+          cv2.line(view, start , end,  color)
         
         cv2.imshow("view", view)
         cv2.waitKey()
@@ -139,19 +149,6 @@ class Stitcher:
    """ 
 
 
-
-
-if __name__ == '__main__':
-
-    #l = cv2.imread('../images/image_5.png',0)
-    #r = cv2.imread('../images/image_6.png',0)
-    image_list = ["../images/image_5.png","../images/image_6.png"]
-
-    stitcher = Stitcher(image_list)
-    stitcher.process_images()
-
-
-    matches = matcher.match_keypoints(l_kp,r_kp)
 
     
 
