@@ -2,6 +2,15 @@ import cv2
 import scipy as sp
 import sys 
 import numpy as np
+import math
+
+class MatchedKeypoint:
+
+  def __init__(self,kp1,kp2,distance):
+    self.kp1 = kp1
+    self.kp2 = kp2
+    self.distance = distance
+
 
 class Stitcher:
 
@@ -27,96 +36,146 @@ class Stitcher:
 
             self.patched_image_ = self.stitch_images(self.patched_image_,image)
 
+            
+    def sparsify_keypoints(self,keypoints,image_dims):
+    
+        def inside(pt,tl,br):
+          return pt[0] > tl[0] and pt[0] < br[0] and pt[1] > tl[1] and pt[1] < br[1]
+        
+        step = image_dims[0]/15
+       
+        sparse_keypoints = []
+        
+        for r in range(0,image_dims[0],step):
+          for c in range(0,image_dims[1],step):
+            
+            sparse_keypoints_in_region = [ kp for kp in keypoints if inside(kp.kp1, (c,r), (c+step,r+step) ) ]
+            sparse_keypoints_in_region = sorted(sparse_keypoints_in_region,key = lambda x: x.distance)
+            sparse_keypoints += sparse_keypoints_in_region[0:2]
 
+            
+        return sparse_keypoints
+        
     def stitch_images(self,image_1,image_2):
 
-        keypoints = (self.find_keypoints(image_1),self.find_keypoints(image_2))
+        keypoints = (self.find_keypoints(image_1),self.find_keypoints(image_2)) # ( (keypoints1,distances1), (keypoints2,distances2) )
+        
+        #match the keypoints and then extract the coordiantes and distances 
         matched_keypoints = self.match_keypoints(keypoints[0],keypoints[1])
+        matched_keypoints = [ MatchedKeypoint(keypoints[0][0][mkp.queryIdx].pt,keypoints[1][0][mkp.trainIdx].pt,mkp.distance) for mkp in matched_keypoints ]
+       
+        matched_keypoints = self.sparsify_keypoints(matched_keypoints, image_1.shape)
+        matched_keypoints = sorted(matched_keypoints,key = lambda x: x.distance)
         
-        matched_keypoints = sorted(matched_keypoints,key = lambda x: x.distance)#, reverse=True)
+        good_keypoints = matched_keypoints
 
-        good_keypoints = [ ((keypoints[0][0][mkp.queryIdx].pt),(keypoints[1][0][mkp.trainIdx].pt)) for mkp in matched_keypoints[:30] ]
-
-        #print len(keypoints[0][0])
-        #print len(keypoints[1][0])
-
-        #for mkp in matched_keypoints[:10]:
-#            try:
-#                pt1 = (keypoints[0][mkp.queryIdx].pt)
-#                pt2 = (keypoints[1][mkp.trainIdx].pt)
- #           except:
- #               print mkp.queryIdx
-  #              print mkp.trainIdx
-   #         good_keypoints.append( pt1,pt2 )
-
-        self.find_relative_pose(np.asarray([x[0] for x in good_keypoints]),np.asarray([x[1] for x in good_keypoints]),image_1,image_2)
+        """view_image = np.ndarray(shape=(image_1.shape[0],image_1.shape[1]*2,3),dtype=np.uint8)
         
-        #tt = []
-        #for mkp in matched_keypoints[:10]:
-        #    tt.append(
-
-
-        #for matched_keypoints
-
+        for i in range(3):
+          view_image[:,0:image_1.shape[1],i] = image_1
+          view_image[:,image_2.shape[1]:image_2.shape[1]*2,i] = image_2
         
-
-    def find_relative_pose(self,kp1,kp2,image_1,image_2):
-
-        (transformation,mask) = cv2.findHomography(kp1,kp2)
+        for kp in good_keypoints:
+          kp2_ = kp.kp2 + np.asarray([image_1.shape[1],0])
+          kp2_ = (int(kp2_[0]),int(kp2_[1]))
+          kp1_ = (int(kp.kp1[0]),int(kp.kp1[1]))
+          cv2.line(view_image,kp1_,kp2_,(244,25,13))
         
-        #x = np.ndarray((3,1))
-        #x[0,0] = kp2[0,0]
-        #x[1,0] = kp2[0,1]
-        #x[2,0] = 1
-
-        #x = np.asarray([kp1[0,0],kp1[0,  1],1])
-        #print x
-        #print transformation.dot(x)
-        #print kp[0,:]
+        cv2.imshow("view", view_image)
+        cv2.waitKey()
+        """
+        
+        transformation = self.find_relative_pose(np.asarray([x.kp1 for x in good_keypoints]),np.asarray([x.kp2 for x in good_keypoints]))
+        
+        self.remap_pixels(transformation,image_1,image_2)
 
         
-        #sys.exit(1)
-        #dist = [m.distance for m in matched_keypoints]
-        #thres_dist = (sum(dist) / len(dist)) * 0.5
-        #sel_matches = [m for m in matched_keypoints if m.distance < thres_dist]
+
+    def find_relative_pose(self,kp1,kp2):
+        #homography is for [y,x,1]
+        (transformation,mask) = cv2.findHomography(kp1,kp2,cv2.cv.CV_RANSAC)
+        
+        return transformation
+        
+        
+    def find_bounding_box(self,homography,h1,w1,h2,w2):     
+      
+      #map the pixels from the corners of the new frame to the coordinate system of the stitched frames
+      inverse = np.linalg.inv(homography)
+  
+      #remap the coordinates of hte image boundaires into the stiched image space
+      top_left = np.dot(inverse,np.asarray([0,0,1]))
+      top_right = np.dot(inverse,np.asarray([w2,0,1]))
+      bottom_left = np.dot(inverse,np.asarray([0,h2,1]))
+      bottom_right = np.dot(inverse,np.asarray([w2,h2,1]))
+      
+      #normalize
+      top_left = top_left/top_left[2]
+      top_right = top_right/top_right[2]
+      bottom_left = bottom_left/bottom_left[2]
+      bottom_right = bottom_right/bottom_right[2]
+      
+      #find the max/min values
+      min_x = min(min(top_left[0],bottom_left[0]),0)
+      max_x = max(max(top_right[0],bottom_right[0]),w1)
+      min_y = min(min(top_left[1],top_right[1]),0)
+      max_y = max(max(bottom_left[1],bottom_right[1]),h1)
+  
+      return (min_x,max_x,min_y,max_y)
+      
+    def remap_pixels(self, homography, image_1,image_2):
     
         h1, w1 = image_1.shape[:2]
         h2, w2 = image_2.shape[:2]
-        view = sp.zeros((max(h1, h2), w1 + w2, 3), sp.uint8)
-        view[:h1, :w1, 0] = image_1
-        view[:h2, w1:, 0] = image_2
-        view[:, :, 1] = view[:, :, 0]
-        view[:, :, 2] = view[:, :, 0]
-    
-        #l_kp = keypoints[0]
-        #r_kp = keypoints[1]
-
-        """for m in sel_matches:
-        # draw the keypoints
-            color = tuple([sp.random.randint(0, 255) for _ in xrange(3)])
-            start = (int(l_kp[0][m.queryIdx].pt[0]),int(l_kp[0][m.queryIdx].pt[1]))
-            end = (int(r_kp[0][m.trainIdx].pt[0] + w1), int(r_kp[0][m.trainIdx].pt[1]))
-    #        print start
-    #        print end
-            cv2.line(view, start , end,  color)
-        """
-        for l,r in zip(kp1,kp2):
-          print l
-        # draw the keypoints
-          color = tuple([sp.random.randint(0, 255) for _ in xrange(3)])
-          start = (int(l[0]),int(l[1]))
-          end = (int(r[0] + w1), int(r[1]))
-    #     print start
-    #     print end
-          cv2.line(view, start , end,  color)
         
+        #project the coordinates of the new image into the space of the initial image
+        x_start,x_end,y_start,y_end = self.find_bounding_box(homography,h1,w1,h2,w2)
+        
+        t_origin = -np.asarray([x_start,y_start])
+        
+        view = np.zeros((y_end-y_start,x_end-x_start, 3), np.uint8)
+        
+        
+        for r in range(view.shape[0]):
+          for c in range(view.shape[1]):
+            
+            #t_origin + 
+            coord = np.asarray([c,r])
+            
+            try:
+              view[r,c] = image_1[coord[1],coord[0]]
+            except Exception as e:
+              inverse_mapped_pt = np.dot(homography,np.asarray([coord[0],coord[1],1]))
+              inverse_mapped_pt = inverse_mapped_pt/inverse_mapped_pt[2]
+              try:
+                view[r,c] = self.interpolate_from(image_2,inverse_mapped_pt[1],inverse_mapped_pt[0])
+              except Exception as e:
+                pass
+
+
         cv2.imshow("view", view)
         cv2.waitKey()
 
+        
+    def interpolate_from(self,image,r,c):
+    
+        rgb = [0,0,0]
+        
+        upper_r = math.ceil(r)
+        upper_c = math.ceil(c)
+        lower_r = math.floor(r)
+        lower_c = math.floor(c)
+        
+        f_r1 = (upper_c - c)*image[lower_r,lower_c] + (c-lower_c)*image[lower_r,upper_c] #interpolate along top row
+        f_r2 = (upper_c - c)*image[upper_r,lower_c] + (c-lower_c)*image[upper_r,upper_c] #interpolate along bottom row
+        return (upper_r - r)*f_r1 + (r-lower_r)*f_r2 #interpolate along row
+        
+        
+        
     def load_images(self,image_list):
 
         images = [cv2.imread(image,0) for image in image_list ]
-        new_size = (images[0].shape[0]/4,images[0].shape[1]/4)
+        new_size = (images[0].shape[1]/4,images[0].shape[0]/4)
         images = map(lambda x: cv2.resize(x,new_size),images)
 
         return images
