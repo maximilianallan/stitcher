@@ -1,6 +1,9 @@
+import os
+os.environ["PATH"] = "c:/users/max/projects/opencv/build32/install/x86/vc12/bin/" + ";" + os.environ["PATH"]
+import sys
 import cv2
 import scipy as sp
-import sys 
+
 import numpy as np
 import math
 
@@ -19,9 +22,9 @@ class Stitcher:
         if len(image_list) < 2:
             raise Exception("Error, need to give at least two images.\n")
 
-        self.DETECTOR_TYPE = "SURF"
-        self.DESCRIPTOR_TYPE = "BRIEF"
-        self.MATCHER_TYPE = "BruteForce-Hamming"
+        self.DETECTOR_TYPE = "SIFT"
+        self.DESCRIPTOR_TYPE = "SIFT"
+        self.MATCHER_TYPE = "BruteForce"
 
         #process first image pair
         self.image_list_ = image_list
@@ -36,6 +39,8 @@ class Stitcher:
 
             self.patched_image_ = self.stitch_images(self.patched_image_,image)
 
+        cv2.imshow("view", self.patched_image_)
+        cv2.waitKey()
             
     def sparsify_keypoints(self,keypoints,image_dims):
     
@@ -67,9 +72,10 @@ class Stitcher:
         matched_keypoints = self.sparsify_keypoints(matched_keypoints, image_1.shape)
         matched_keypoints = sorted(matched_keypoints,key = lambda x: x.distance)
         
-        good_keypoints = matched_keypoints
+        good_keypoints = matched_keypoints[0:40]
 
-        """view_image = np.ndarray(shape=(image_1.shape[0],image_1.shape[1]*2,3),dtype=np.uint8)
+        """
+        view_image = np.ndarray(shape=(image_1.shape[0],image_1.shape[1]*2,3),dtype=np.uint8)
         
         for i in range(3):
           view_image[:,0:image_1.shape[1],i] = image_1
@@ -87,13 +93,13 @@ class Stitcher:
         
         transformation = self.find_relative_pose(np.asarray([x.kp1 for x in good_keypoints]),np.asarray([x.kp2 for x in good_keypoints]))
         
-        self.remap_pixels(transformation,image_1,image_2)
+        return self.remap_pixels(transformation,image_1,image_2)
 
         
 
     def find_relative_pose(self,kp1,kp2):
         #homography is for [y,x,1]
-        (transformation,mask) = cv2.findHomography(kp1,kp2,cv2.cv.CV_RANSAC)
+        (transformation,mask) = cv2.findHomography(kp1,kp2,cv2.RANSAC)
         
         return transformation
         
@@ -153,9 +159,9 @@ class Stitcher:
                 pass
 
 
-        cv2.imshow("view", view)
-        cv2.waitKey()
-
+        #cv2.imshow("view", view)
+        #cv2.waitKey()
+        return view
         
     def interpolate_from(self,image,r,c):
     
@@ -174,7 +180,7 @@ class Stitcher:
         
     def load_images(self,image_list):
 
-        images = [cv2.imread(image,0) for image in image_list ]
+        images = [cv2.imread(image) for image in image_list ]
         new_size = (images[0].shape[1]/4,images[0].shape[0]/4)
         images = map(lambda x: cv2.resize(x,new_size),images)
 
@@ -184,9 +190,10 @@ class Stitcher:
 
         detector = cv2.FeatureDetector_create(self.DETECTOR_TYPE)
         descriptor = cv2.DescriptorExtractor_create(self.DESCRIPTOR_TYPE)
-
-        kp = detector.detect(image)
-        (k,d) = descriptor.compute(image,kp)
+        
+        image_gs = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
+        kp = detector.detect(image_gs)
+        (k,d) = descriptor.compute(image_gs,kp)
         return (k,d)
 
 
