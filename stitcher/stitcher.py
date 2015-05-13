@@ -35,12 +35,17 @@ class Stitcher:
 
         self.patched_image_ = self.image_list_.pop()
                        
-        for image in self.image_list_:
-
-            self.patched_image_ = self.stitch_images(self.patched_image_,image)
-
-        cv2.imshow("view", self.patched_image_)
-        cv2.waitKey()
+        for n,image in enumerate(self.image_list_):
+            
+            print("Stitching image: {0}".format(n))
+            if n == 0:
+              self.patched_image_ = cv2.imread("patch.png")
+            else:
+              self.patched_image_ = self.stitch_images(self.patched_image_,image)
+        
+        cv2.imwrite("patch.png",self.patched_image_)
+        #cv2.imshow("view", self.patched_image_)
+        #cv2.waitKey()
             
     def sparsify_keypoints(self,keypoints,image_dims):
     
@@ -60,7 +65,11 @@ class Stitcher:
 
             
         return sparse_keypoints
-        
+       
+    """
+    Find the keypoints between image 1 and image 2. Then match the keypoints and sparsify them. Sort them by their
+    matching score and use the best 4 to find the homography. The pixels are then remapped to the new image plane.
+    """
     def stitch_images(self,image_1,image_2):
 
         keypoints = (self.find_keypoints(image_1),self.find_keypoints(image_2)) # ( (keypoints1,distances1), (keypoints2,distances2) )
@@ -68,9 +77,13 @@ class Stitcher:
         #match the keypoints and then extract the coordiantes and distances 
         matched_keypoints = self.match_keypoints(keypoints[0],keypoints[1])
         matched_keypoints = [ MatchedKeypoint(keypoints[0][0][mkp.queryIdx].pt,keypoints[1][0][mkp.trainIdx].pt,mkp.distance) for mkp in matched_keypoints ]
+        
+        print("Matched {m} of them".format(m=len(matched_keypoints)))
        
         matched_keypoints = self.sparsify_keypoints(matched_keypoints, image_1.shape)
         matched_keypoints = sorted(matched_keypoints,key = lambda x: x.distance)
+        
+        print("After sparsification there are {m} left".format(m=len(matched_keypoints)))
         
         good_keypoints = matched_keypoints[0:40]
 
@@ -126,7 +139,7 @@ class Stitcher:
       max_x = max(max(top_right[0],bottom_right[0]),w1)
       min_y = min(min(top_left[1],top_right[1]),0)
       max_y = max(max(bottom_left[1],bottom_right[1]),h1)
-  
+      
       return (min_x,max_x,min_y,max_y)
       
     def remap_pixels(self, homography, image_1,image_2):
@@ -137,33 +150,39 @@ class Stitcher:
         #project the coordinates of the new image into the space of the initial image
         x_start,x_end,y_start,y_end = self.find_bounding_box(homography,h1,w1,h2,w2)
         
-        t_origin = -np.asarray([x_start,y_start])
+        t_origin = np.asarray([x_start,y_start])
+        #print(t_origin)
         
         view = np.zeros((y_end-y_start,x_end-x_start, 3), np.uint8)
         
+        print("Allocating a new view of size {0}".format(view.shape))
         
         for r in range(view.shape[0]):
           for c in range(view.shape[1]):
             
             #t_origin + 
-            coord = np.asarray([c,r])
-            
+            coord = t_origin + np.asarray([c,r])
+           
             try:
-              view[r,c] = image_1[coord[1],coord[0]]
+              if coord[1] < 0 or coord[0] < 0: raise IndexError
+              view[r,c] = image_1[coord[1],coord[0]] #see if we can 
+              #print("Hit at {r},{c}".format(r=r,c=c))
             except Exception as e:
               inverse_mapped_pt = np.dot(homography,np.asarray([coord[0],coord[1],1]))
               inverse_mapped_pt = inverse_mapped_pt/inverse_mapped_pt[2]
               try:
                 view[r,c] = self.interpolate_from(image_2,inverse_mapped_pt[1],inverse_mapped_pt[0])
               except Exception as e:
+                
                 pass
 
-
-        #cv2.imshow("view", view)
-        #cv2.waitKey()
+            
+        
         return view
         
     def interpolate_from(self,image,r,c):
+    
+        if r < 0 or c < 0: raise IndexError
     
         rgb = [0,0,0]
         
@@ -171,7 +190,7 @@ class Stitcher:
         upper_c = math.ceil(c)
         lower_r = math.floor(r)
         lower_c = math.floor(c)
-        
+                
         f_r1 = (upper_c - c)*image[lower_r,lower_c] + (c-lower_c)*image[lower_r,upper_c] #interpolate along top row
         f_r2 = (upper_c - c)*image[upper_r,lower_c] + (c-lower_c)*image[upper_r,upper_c] #interpolate along bottom row
         return (upper_r - r)*f_r1 + (r-lower_r)*f_r2 #interpolate along row
